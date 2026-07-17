@@ -85,11 +85,9 @@
     }
     .logo {
       font-size: clamp(2.5rem, 8vw, 5rem); font-weight: 700; letter-spacing: -.04em;
-      color: #32CD32;
-      background:
-        repeating-conic-gradient(#32CD32 0% 25%, #00FF00 25% 50%) 0 0 / 40px 40px;
+      background: repeating-conic-gradient(#32CD32 0% 25%, #00FF00 25% 50%) 0 0 / 40px 40px;
       -webkit-background-clip: text; background-clip: text;
-      -webkit-text-fill-color: transparent;
+      -webkit-text-fill-color: transparent; color: transparent;
       animation: logoScroll .6s linear infinite;
       user-select: none;
     }
@@ -458,7 +456,7 @@
 
   <!-- ===== HOME PAGE ===== -->
   <div class="home" id="home">
-    <div class="logo" id="logo" aria-hidden="true"></div>
+    <div class="logo" id="logo" aria-hidden="true">Ligma Browser</div>
     <p class="tagline">Fast. Modern. Private.</p>
 
     <form class="search-wrap" id="searchForm" role="search" aria-label="Search">
@@ -597,18 +595,8 @@
     // (no API key, no tracking, works from any origin)
     // ============================================
     const DDG_URL = 'https://html.duckduckgo.com/html/';
-    const SEARXNG_URLS = [
-      'https://search.sapti.me',
-      'https://searx.tiekoetter.com',
-      'https://search.bus-hit.me',
-    ];
     const PROXIES = [
-      url => 'https://cors-anywhere.com/' + url,
-      url => 'https://cors.dev/' + url,
-      url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
-      url => 'https://api.cors.lol/?url=' + encodeURIComponent(url),
-      url => 'https://proxy.killcors.com?url=' + encodeURIComponent(url),
-      url => 'https://corsfix.com/?url=' + encodeURIComponent(url),
+      url => 'https://api.allorigins.win/get?url=' + encodeURIComponent(url),
     ];
 
     function buildSearchURL(query, page) {
@@ -621,44 +609,21 @@
       return DDG_URL + '?' + params.toString();
     }
 
-    function buildSearxngURL(base, query) {
-      return base + '/search?q=' + encodeURIComponent(query) + '&format=json&categories=general';
-    }
-
-    function parseSearxngResults(data) {
-      const results = [];
-      if (data.results) {
-        data.results.slice(0, 30).forEach(r => {
-          results.push({
-            title: r.title || '',
-            url: r.url || '',
-            displayUrl: r.url || '',
-            desc: r.content || '',
-          });
-        });
-      }
-      return { results, total: results.length, error: null };
+    function fetchTimeout(url, ms) {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), ms);
+      return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(id));
     }
 
     async function fetchResults(query, page) {
-      // Try SearXNG instances first (JSON API, no proxy needed)
-      for (const base of SEARXNG_URLS) {
-        try {
-          const resp = await fetch(buildSearxngURL(base, query), { signal: AbortSignal.timeout(4000) });
-          if (!resp.ok) continue;
-          const data = await resp.json();
-          if (data.results && data.results.length > 0) return parseSearxngResults(data);
-        } catch {}
-      }
-
-      // Fall back to DuckDuckGo HTML via proxies
       const url = buildSearchURL(query, page);
       for (const proxy of PROXIES) {
         try {
-          const resp = await fetch(proxy(url), { signal: AbortSignal.timeout(5000) });
+          const resp = await fetchTimeout(proxy(url), 8000);
           if (!resp.ok) continue;
-          const html = await resp.text();
-          if (html.includes('result__body') || html.includes('result__a')) {
+          const json = await resp.json();
+          const html = json.contents;
+          if (html && html.includes('result')) {
             return parseResults(html);
           }
         } catch {}
@@ -943,4 +908,46 @@
       'party': 'party',
       'roll': Math.floor(Math.random() * 100 + 1) + '',
       'sudo': 'Nice try. You are not root.',
-      '
+      'password': 'hunter2',
+      'what is love': 'Baby don\'t hurt me.',
+      'the answer': '42.',
+      'google': 'You\'re already here. Why would you Google Google?',
+      'browser': 'This is a search engine, not a browser. We searched the web for "browser" and found ourselves.',
+    };
+
+    const origSearch = doSearch;
+    function easterEggSearch(q, p) {
+      const lower = q.toLowerCase().trim();
+      if (lower === 'party') { spawnConfetti(); showToast('PARTY MODE'); }
+      else if (easterEggs[lower]) { showToast(easterEggs[lower]); }
+      origSearch(q, p);
+    }
+
+    // Easter egg: triple-click logo
+    let logoClicks = 0;
+    let logoTimer = null;
+    document.getElementById('logo').addEventListener('click', () => {
+      logoClicks++;
+      clearTimeout(logoTimer);
+      logoTimer = setTimeout(() => { logoClicks = 0; }, 500);
+      if (logoClicks >= 3) {
+        logoClicks = 0;
+        showToast('You found the secret!');
+        spawnConfetti();
+        document.getElementById('logo').style.transform = 'rotate(360deg)';
+        document.getElementById('logo').style.transition = 'transform 1s ease';
+        setTimeout(() => { document.getElementById('logo').style.transform = ''; }, 1000);
+      }
+    });
+  })();
+  </script>
+  <style>
+    @keyframes konamiShake {
+      0%,100%{transform:translateX(0)} 20%{transform:translateX(-15px)} 40%{transform:translateX(15px)} 60%{transform:translateX(-10px)} 80%{transform:translateX(10px)}
+    }
+    @keyframes confettiFall {
+      0%{transform:translateY(0) rotate(0deg);opacity:1} 100%{transform:translateY(100vh) rotate(720deg);opacity:0}
+    }
+  </style>
+</body>
+</html>
