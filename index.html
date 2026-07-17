@@ -563,6 +563,7 @@
     // (no API key, no tracking, works from any origin)
     // ============================================
     const DDG_URL = 'https://html.duckduckgo.com/html/';
+    const PROXY = 'https://corsproxy.io/?url=';
 
     function buildSearchURL(query, page) {
       const params = new URLSearchParams({
@@ -577,7 +578,7 @@
     async function fetchResults(query, page) {
       const url = buildSearchURL(query, page);
       try {
-        const resp = await fetch(url);
+        const resp = await fetch(PROXY + encodeURIComponent(url));
         const html = await resp.text();
         return parseResults(html);
       } catch (err) {
