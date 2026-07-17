@@ -85,29 +85,40 @@
     }
     .logo {
       font-size: clamp(2.5rem, 8vw, 5rem); font-weight: 700; letter-spacing: -.04em;
+      user-select: none;
+    }
+    /* NOTE: the gradient/clip is applied per-letter (see .logo .letter) rather than
+       on the parent, because -webkit-background-clip:text only clips against an
+       element's OWN text -- it does not apply to child elements. Applying it only
+       to .logo left every letter (wrapped in its own <span>) with transparent fill
+       and nothing to clip against, so the whole logo rendered invisible. */
+    .logo .letter {
+      display: inline-block;
+      opacity: 0;
+      transform: translateY(-60px) rotate(-15deg);
       background: repeating-conic-gradient(#32CD32 0% 25%, #00FF00 25% 50%) 0 0 / 40px 40px;
       -webkit-background-clip: text; background-clip: text;
       -webkit-text-fill-color: transparent; color: transparent;
-      animation: logoScroll .6s linear infinite;
-      user-select: none;
+      animation: letterDrop .5s cubic-bezier(.17,.67,.35,1.2) forwards,
+                 logoScroll .6s linear infinite;
     }
     @keyframes logoScroll {
       0%   { background-position: 0 0; }
       100% { background-position: 40px 40px; }
     }
-    .logo .letter {
-      display: inline-block;
-      opacity: 0;
-      transform: translateY(-60px) rotate(-15deg);
-      animation: letterDrop .5s cubic-bezier(.17,.67,.35,1.2) forwards;
-    }
-    .logo .space { display: inline-block; width: .3em; }
     @keyframes letterDrop {
       0% { opacity: 0; transform: translateY(-60px) rotate(-15deg); }
       60% { opacity: 1; transform: translateY(6px) rotate(2deg); }
       80% { transform: translateY(-3px) rotate(-1deg); }
       100% { opacity: 1; transform: translateY(0) rotate(0deg); }
     }
+    .logo .space { display: inline-block; width: .3em; }
+    /* Fallback: if -webkit-background-clip:text isn't supported, show solid green text
+       instead of invisible transparent text */
+    @supports not (background-clip: text) {
+      .logo .letter { color: #32CD32; -webkit-text-fill-color: initial; }
+    }
+
     .tagline {
       font-size: clamp(.9rem, 2vw, 1.1rem); color: var(--text2); margin-top: .3rem; text-align: center;
     }
@@ -191,6 +202,9 @@
       -webkit-text-fill-color: transparent;
       animation: logoScroll .6s linear infinite;
       cursor: pointer; flex-shrink: 0; user-select: none;
+    }
+    @supports not (background-clip: text) {
+      .results-logo { color: #32CD32; -webkit-text-fill-color: initial; }
     }
     .results-search {
       flex: 1; max-width: 600px; height: 44px;
@@ -285,7 +299,7 @@
     .settings-menu {
       position: fixed; top: 66px; right: 20px; z-index: 100;
       min-width: 200px; background: var(--elevated); border: 1px solid var(--border);
-      border-radius: var(--r); backdrop-filter: var(--blur); box-shadow: var(--shadow-lg);
+      border-radius: var(--r); backdrop-filter: var(--blur); box-shadow: var(--shadow);
       padding: 8px; opacity: 0; visibility: hidden; transform: translateY(-8px);
       transition: all .2s ease;
     }
@@ -330,7 +344,7 @@
     .modal {
       width: 90%; max-width: 400px;
       background: var(--elevated); border: 1px solid var(--border);
-      border-radius: var(--r); box-shadow: var(--shadow-lg);
+      border-radius: var(--r); box-shadow: var(--shadow);
       padding: 28px; text-align: center;
       transform: scale(.95); transition: transform .2s ease;
     }
@@ -591,23 +605,40 @@
 
     // ============================================
     // LIGMA SEARCH ENGINE
-    // Uses DuckDuckGo Lite's HTML endpoint
-    // (no API key, no tracking, works from any origin)
+    // Uses public SearXNG metasearch instances instead of scraping
+    // DuckDuckGo directly -- DDG actively fingerprints and blocks
+    // requests coming from known proxy IPs, which made every attempt
+    // fail. SearXNG instances are ordinary open-source search
+    // aggregators and are far more tolerant of this kind of use.
+    // Several instances + methods are raced in parallel; whichever
+    // succeeds first wins, so one flaky instance doesn't stall search.
     // ============================================
-    const DDG_URL = 'https://html.duckduckgo.com/html/';
-    const PROXIES = [
-      url => 'https://api.allorigins.win/get?url=' + encodeURIComponent(url),
+    const SEARX_INSTANCES = [
+      'https://searx.be',
+      'https://priv.au',
+      'https://search.inetol.net',
+      'https://baresearch.org',
     ];
 
-    function buildSearchURL(query, page) {
-      const params = new URLSearchParams({
-        q: query,
-        kl: 'us-en',
-      });
-      if (page > 1) params.set('s', String((page - 1) * 30));
-      params.set('dc', String((page - 1) * 30 + 1));
-      return DDG_URL + '?' + params.toString();
-    }
+    // CORS proxies used only for the HTML fallback path (some SearXNG
+    // instances don't send CORS headers on their normal search page).
+    const PROXIES = [
+      {
+        name: 'codetabs',
+        build: url => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
+        extract: async resp => resp.text(),
+      },
+      {
+        name: 'allorigins-raw',
+        build: url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+        extract: async resp => resp.text(),
+      },
+      {
+        name: 'corsproxy.io',
+        build: url => 'https://corsproxy.io/?url=' + encodeURIComponent(url),
+        extract: async resp => resp.text(),
+      },
+    ];
 
     function fetchTimeout(url, ms) {
       const controller = new AbortController();
@@ -615,53 +646,74 @@
       return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(id));
     }
 
-    async function fetchResults(query, page) {
-      const url = buildSearchURL(query, page);
-      for (const proxy of PROXIES) {
-        try {
-          const resp = await fetchTimeout(proxy(url), 8000);
-          if (!resp.ok) continue;
-          const json = await resp.json();
-          const html = json.contents;
-          if (html && html.includes('result')) {
-            return parseResults(html);
-          }
-        } catch {}
-      }
-      return { results: [], total: 0, error: 'Search failed. Try again.' };
+    // Fast path: call a SearXNG instance's JSON API directly (no proxy).
+    // Works whenever the instance allows CORS + json format.
+    async function tryJsonInstance(base, query, page) {
+      const url = base + '/search?q=' + encodeURIComponent(query) + '&format=json' + (page > 1 ? '&pageno=' + page : '');
+      const resp = await fetchTimeout(url, 6000);
+      if (!resp.ok) throw new Error(base + ' json HTTP ' + resp.status);
+      const data = await resp.json();
+      if (!data || !Array.isArray(data.results) || !data.results.length) throw new Error(base + ' json: no results');
+      return {
+        results: data.results.slice(0, 20).map(r => ({
+          title: r.title || r.url,
+          url: r.url,
+          displayUrl: r.url,
+          desc: r.content || '',
+        })),
+        total: data.number_of_results || data.results.length,
+      };
     }
 
-    function parseResults(html) {
+    // Fallback path: fetch the instance's normal HTML search page through a
+    // CORS proxy and parse the result cards out of the markup.
+    async function tryHtmlInstance(base, proxy, query, page) {
+      const target = base + '/search?q=' + encodeURIComponent(query) + (page > 1 ? '&pageno=' + page : '');
+      const resp = await fetchTimeout(proxy.build(target), 9000);
+      if (!resp.ok) throw new Error(base + '/' + proxy.name + ' HTTP ' + resp.status);
+      const html = await proxy.extract(resp);
+      if (!html || typeof html !== 'string' || html.length < 200) throw new Error(base + '/' + proxy.name + ' empty response');
+      const parsed = parseSearxHtml(html);
+      if (!parsed.results.length) throw new Error(base + '/' + proxy.name + ' no results parsed');
+      return parsed;
+    }
+
+    function parseSearxHtml(html) {
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const results = [];
-
-      // DuckDuckGo HTML uses .result__body for each result
-      doc.querySelectorAll('.result').forEach(el => {
-        const linkEl = el.querySelector('.result__a');
-        const snippetEl = el.querySelector('.result__snippet');
-        const urlEl = el.querySelector('.result__url');
-        if (!linkEl) return;
-        const href = linkEl.getAttribute('href') || '';
-        // DDG HTML wraps URLs, try to extract the real one
-        let realUrl = href;
-        if (href.includes('uddg=')) {
-          try { realUrl = decodeURIComponent(new URL(href, 'https://duckduckgo.com').searchParams.get('uddg')); } catch {}
-        }
+      const seen = new Set();
+      doc.querySelectorAll('.result, article.result').forEach(el => {
+        const link = el.querySelector('a[href^="http"]');
+        if (!link) return;
+        const url = link.getAttribute('href');
+        const title = (link.textContent || '').trim();
+        if (!url || !title || seen.has(url)) return;
+        seen.add(url);
+        const snippetEl = el.querySelector('.content, p.content, p');
         results.push({
-          title: linkEl.textContent.trim(),
-          url: realUrl,
-          displayUrl: urlEl ? urlEl.textContent.trim() : realUrl,
+          title,
+          url,
+          displayUrl: url,
           desc: snippetEl ? snippetEl.textContent.trim() : '',
         });
       });
+      return { results, total: results.length };
+    }
 
-      // Try to get result count
-      let total = 0;
-      const countEl = doc.querySelector('.results--main .result--ad + .result');
-      // DuckDuckGo HTML doesn't always show a count, estimate from results
-      total = results.length;
+    async function fetchResults(query, page) {
+      const attemptFns = [];
+      SEARX_INSTANCES.forEach(base => attemptFns.push(() => tryJsonInstance(base, query, page)));
+      SEARX_INSTANCES.slice(0, 2).forEach(base => {
+        PROXIES.forEach(proxy => attemptFns.push(() => tryHtmlInstance(base, proxy, query, page)));
+      });
 
-      return { results, total };
+      try {
+        return await Promise.any(attemptFns.map(fn => fn()));
+      } catch (aggErr) {
+        const reasons = aggErr && aggErr.errors ? aggErr.errors.map(e => e.message).join(' | ') : String(aggErr);
+        console.warn('Ligma search: all attempts failed ->', reasons);
+        return { results: [], total: 0, error: true, fallbackUrl: SEARX_INSTANCES[0] + '/search?q=' + encodeURIComponent(query) };
+      }
     }
 
     // ============================================
@@ -704,7 +756,13 @@
       const data = await fetchResults(currentQuery, currentPage);
 
       if (data.error) {
-        resultsList.innerHTML = '<div style="text-align:center;padding:4rem;color:var(--text3)"><p>' + esc(data.error) + '</p></div>';
+        resultsList.innerHTML =
+          '<div style="text-align:center;padding:4rem;color:var(--text3)">' +
+          '<p style="margin-bottom:1rem">All search instances are busy or unreachable right now. This can happen occasionally with free public instances — try again in a moment.</p>' +
+          '<button id="retrySearchBtn" style="padding:10px 24px;border-radius:999px;font-weight:600;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0B0F14">Try Again</button>' +
+          '</div>';
+        const retryBtn = document.getElementById('retrySearchBtn');
+        if (retryBtn) retryBtn.addEventListener('click', () => doSearch(currentQuery, currentPage));
         return;
       }
 
