@@ -224,9 +224,9 @@
     }
 
     .results-list {
-      flex: 1; padding: 0 clamp(1.5rem,5vw,4rem) 4rem;
+      flex: 1; padding: 0 clamp(1rem,5vw,4rem) 4rem;
       display: flex; flex-direction: column; gap: 0;
-      max-width: 720px;
+      max-width: 720px; width: 100%; margin: 0 auto;
     }
 
     .result-item {
@@ -354,11 +354,41 @@
 
     /* ===== RESPONSIVE ===== */
     @media (max-width: 640px) {
-      .search-bar { height: 52px; }
-      .quick a { width: 72px; padding: 12px 6px; font-size: .7rem; }
-      .results-bar { padding: 10px 14px; gap: 8px; }
-      .results-logo { font-size: 1.1rem; }
+      .home { padding: 1rem; }
+      .search-wrap { max-width: 100%; margin-top: 2rem; }
+      .search-bar { height: 50px; }
+      .search-bar input { font-size: .95rem; padding: 0 12px; }
+      .search-icon { width: 42px; }
+      .search-go { width: 40px; height: 40px; margin-right: 4px; }
+      .quick { gap: 8px; margin-top: 1.5rem; }
+      .quick a { width: 68px; padding: 12px 6px; font-size: .65rem; }
+      .quick a img { width: 24px; height: 24px; }
+      .results-bar { padding: 10px 12px; gap: 8px; }
+      .results-logo { font-size: 1rem; flex-shrink: 0; }
+      .results-search { height: 40px; }
+      .results-search input { font-size: .85rem; padding: 0 8px; }
+      .results-search .search-icon { width: 32px; }
+      .results-search .search-go { width: 32px; height: 32px; }
       .results-list { padding: 0 1rem 3rem; }
+      .result-title { font-size: 1rem; }
+      .result-desc { font-size: .82rem; }
+      .settings-btn { top: 10px; right: 12px; width: 38px; height: 38px; }
+      .settings-btn svg { width: 18px; height: 18px; }
+      .settings-menu { top: 58px; right: 12px; min-width: 180px; }
+      .pagination { padding: 1.5rem 1rem 3rem; }
+      .pagination button { padding: 8px 16px; font-size: .82rem; }
+      footer { padding: 16px 12px; font-size: .7rem; }
+    }
+    @media (max-width: 360px) {
+      .logo { font-size: 2rem; }
+      .search-bar { height: 46px; }
+      .quick { gap: 6px; }
+      .quick a { width: 58px; padding: 10px 4px; font-size: .6rem; }
+      .quick a img { width: 20px; height: 20px; }
+    }
+    @media (min-width: 641px) and (max-width: 1024px) {
+      .search-wrap { max-width: 540px; }
+      .quick a { width: 80px; padding: 14px 6px; }
     }
   </style>
 </head>
@@ -563,7 +593,11 @@
     // (no API key, no tracking, works from any origin)
     // ============================================
     const DDG_URL = 'https://html.duckduckgo.com/html/';
-    const PROXY = 'https://corsproxy.io/?url=';
+    const PROXIES = [
+      url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+      url => 'https://api.cors.lol/?url=' + encodeURIComponent(url),
+      url => 'https://proxy.killcors.com?url=' + encodeURIComponent(url),
+    ];
 
     function buildSearchURL(query, page) {
       const params = new URLSearchParams({
@@ -577,13 +611,17 @@
 
     async function fetchResults(query, page) {
       const url = buildSearchURL(query, page);
-      try {
-        const resp = await fetch(PROXY + encodeURIComponent(url));
-        const html = await resp.text();
-        return parseResults(html);
-      } catch (err) {
-        return { results: [], total: 0, error: 'Search failed. Try again.' };
+      for (const proxy of PROXIES) {
+        try {
+          const resp = await fetch(proxy(url), { signal: AbortSignal.timeout(5000) });
+          if (!resp.ok) continue;
+          const html = await resp.text();
+          if (html.includes('result__body') || html.includes('result__a')) {
+            return parseResults(html);
+          }
+        } catch {}
       }
+      return { results: [], total: 0, error: 'Search failed. Try again.' };
     }
 
     function parseResults(html) {
@@ -867,42 +905,4 @@
       'what is love': 'Baby don\'t hurt me.',
       'the answer': '42.',
       'google': 'You\'re already here. Why would you Google Google?',
-      'browser': 'This is a search engine, not a browser. We searched the web for "browser" and found ourselves.',
-    };
-
-    const origSearch = doSearch;
-    function easterEggSearch(q, p) {
-      const lower = q.toLowerCase().trim();
-      if (lower === 'party') { spawnConfetti(); showToast('PARTY MODE'); }
-      else if (easterEggs[lower]) { showToast(easterEggs[lower]); }
-      origSearch(q, p);
-    }
-
-    // Easter egg: triple-click logo
-    let logoClicks = 0;
-    let logoTimer = null;
-    document.getElementById('logo').addEventListener('click', () => {
-      logoClicks++;
-      clearTimeout(logoTimer);
-      logoTimer = setTimeout(() => { logoClicks = 0; }, 500);
-      if (logoClicks >= 3) {
-        logoClicks = 0;
-        showToast('You found the secret!');
-        spawnConfetti();
-        document.getElementById('logo').style.transform = 'rotate(360deg)';
-        document.getElementById('logo').style.transition = 'transform 1s ease';
-        setTimeout(() => { document.getElementById('logo').style.transform = ''; }, 1000);
-      }
-    });
-  })();
-  </script>
-  <style>
-    @keyframes konamiShake {
-      0%,100%{transform:translateX(0)} 20%{transform:translateX(-15px)} 40%{transform:translateX(15px)} 60%{transform:translateX(-10px)} 80%{transform:translateX(10px)}
-    }
-    @keyframes confettiFall {
-      0%{transform:translateY(0) rotate(0deg);opacity:1} 100%{transform:translateY(100vh) rotate(720deg);opacity:0}
-    }
-  </style>
-</body>
-</html>
+      '
