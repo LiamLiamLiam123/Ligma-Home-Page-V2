@@ -298,7 +298,8 @@
     .settings-btn svg { width: 20px; height: 20px; }
     .settings-menu {
       position: fixed; top: 66px; right: 20px; z-index: 100;
-      min-width: 200px; background: var(--elevated); border: 1px solid var(--border);
+      min-width: 220px; max-height: 80vh; overflow-y: auto;
+      background: var(--elevated); border: 1px solid var(--border);
       border-radius: var(--r); backdrop-filter: var(--blur); box-shadow: var(--shadow);
       padding: 8px; opacity: 0; visibility: hidden; transform: translateY(-8px);
       transition: all .2s ease;
@@ -618,10 +619,17 @@
       'https://priv.au',
       'https://search.inetol.net',
       'https://baresearch.org',
+      'https://opnxng.com',
+      'https://searx.tiekoetter.com',
+      'https://paulgo.io',
+      'https://search.sapti.me',
     ];
 
     // CORS proxies used only for the HTML fallback path (some SearXNG
     // instances don't send CORS headers on their normal search page).
+    // corsproxy.io is intentionally excluded here -- it actively 403s
+    // requests coming from null/opaque origins (e.g. sandboxed iframes),
+    // which made it worse than useless in practice.
     const PROXIES = [
       {
         name: 'codetabs',
@@ -634,16 +642,16 @@
         extract: async resp => resp.text(),
       },
       {
-        name: 'corsproxy.io',
-        build: url => 'https://corsproxy.io/?url=' + encodeURIComponent(url),
+        name: 'cors.eu.org',
+        build: url => 'https://cors.eu.org/' + url,
         extract: async resp => resp.text(),
       },
     ];
 
-    function fetchTimeout(url, ms) {
+    function fetchTimeout(url, ms, init) {
       const controller = new AbortController();
       const id = setTimeout(() => controller.abort(), ms);
-      return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(id));
+      return fetch(url, { ...(init || {}), signal: controller.signal }).finally(() => clearTimeout(id));
     }
 
     // Fast path: call a SearXNG instance's JSON API directly (no proxy).
@@ -669,7 +677,7 @@
     // CORS proxy and parse the result cards out of the markup.
     async function tryHtmlInstance(base, proxy, query, page) {
       const target = base + '/search?q=' + encodeURIComponent(query) + (page > 1 ? '&pageno=' + page : '');
-      const resp = await fetchTimeout(proxy.build(target), 9000);
+      const resp = await fetchTimeout(proxy.build(target), 7000);
       if (!resp.ok) throw new Error(base + '/' + proxy.name + ' HTTP ' + resp.status);
       const html = await proxy.extract(resp);
       if (!html || typeof html !== 'string' || html.length < 200) throw new Error(base + '/' + proxy.name + ' empty response');
@@ -700,10 +708,48 @@
       return { results, total: results.length };
     }
 
+    // ============================================
+    // OPTIONAL: Google Custom Search API, curated to ~50 sites
+    // Fill in your API key + Search Engine ID (cx) below. Get both free at
+    // https://programmablesearchengine.google.com/ (create the engine and
+    // add the curated site list) and
+    // https://console.cloud.google.com/apis/credentials (enable "Custom
+    // Search API", create an API key). Free tier: 100 searches/day.
+    // Leave both empty to skip straight to the free keyless SearX fallback.
+    // ============================================
+    const GOOGLE_API_KEY = 'AIzaSyC1RESh0fKm9JPFHx1VS8BbpzFEMAFTSs8'; // <-- paste your API key here
+    const GOOGLE_CX = '15c249f46166447cb'; // <-- paste your Search Engine ID (cx) here
+
+    async function tryGoogleCSE(query, page) {
+      if (!GOOGLE_API_KEY || !GOOGLE_CX) throw new Error('Google CSE not configured');
+      const start = page > 1 ? (page - 1) * 10 + 1 : 1;
+      const url = 'https://www.googleapis.com/customsearch/v1?key=' + encodeURIComponent(GOOGLE_API_KEY) +
+        '&cx=' + encodeURIComponent(GOOGLE_CX) + '&q=' + encodeURIComponent(query) + '&start=' + start;
+      const resp = await fetchTimeout(url, 8000);
+      if (!resp.ok) {
+        let msg = 'Google CSE HTTP ' + resp.status;
+        try { const errData = await resp.json(); if (errData && errData.error && errData.error.message) msg += ': ' + errData.error.message; } catch {}
+        throw new Error(msg);
+      }
+      const data = await resp.json();
+      if (!data.items || !data.items.length) throw new Error('Google CSE: no results');
+      return {
+        results: data.items.map(it => ({ title: it.title, url: it.link, displayUrl: it.displayLink || it.link, desc: it.snippet || '' })),
+        total: data.searchInformation ? (parseInt(data.searchInformation.totalResults, 10) || data.items.length) : data.items.length,
+      };
+    }
+
     async function fetchResults(query, page) {
+      if (GOOGLE_API_KEY && GOOGLE_CX) {
+        try {
+          return await tryGoogleCSE(query, page);
+        } catch (e) {
+          console.warn('Google CSE failed, falling back to free search ->', e.message);
+        }
+      }
       const attemptFns = [];
       SEARX_INSTANCES.forEach(base => attemptFns.push(() => tryJsonInstance(base, query, page)));
-      SEARX_INSTANCES.slice(0, 2).forEach(base => {
+      SEARX_INSTANCES.slice(0, 4).forEach(base => {
         PROXIES.forEach(proxy => attemptFns.push(() => tryHtmlInstance(base, proxy, query, page)));
       });
 
