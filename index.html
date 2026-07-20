@@ -709,44 +709,11 @@
     }
 
     // ============================================
-    // OPTIONAL: Google Custom Search API, curated to ~50 sites
-    // Fill in your API key + Search Engine ID (cx) below. Get both free at
-    // https://programmablesearchengine.google.com/ (create the engine and
-    // add the curated site list) and
-    // https://console.cloud.google.com/apis/credentials (enable "Custom
-    // Search API", create an API key). Free tier: 100 searches/day.
-    // Leave both empty to skip straight to the free keyless SearX fallback.
+    // Search entry point: purely keyless, no sign-in or API key required
+    // anywhere. Races several free SearXNG instances/methods in parallel;
+    // first one back with real results wins.
     // ============================================
-    const GOOGLE_API_KEY = 'AIzaSyC1RESh0fKm9JPFHx1VS8BbpzFEMAFTSs8'; // <-- paste your API key here
-    const GOOGLE_CX = '15c249f46166447cb'; // <-- paste your Search Engine ID (cx) here
-
-    async function tryGoogleCSE(query, page) {
-      if (!GOOGLE_API_KEY || !GOOGLE_CX) throw new Error('Google CSE not configured');
-      const start = page > 1 ? (page - 1) * 10 + 1 : 1;
-      const url = 'https://www.googleapis.com/customsearch/v1?key=' + encodeURIComponent(GOOGLE_API_KEY) +
-        '&cx=' + encodeURIComponent(GOOGLE_CX) + '&q=' + encodeURIComponent(query) + '&start=' + start;
-      const resp = await fetchTimeout(url, 8000);
-      if (!resp.ok) {
-        let msg = 'Google CSE HTTP ' + resp.status;
-        try { const errData = await resp.json(); if (errData && errData.error && errData.error.message) msg += ': ' + errData.error.message; } catch {}
-        throw new Error(msg);
-      }
-      const data = await resp.json();
-      if (!data.items || !data.items.length) throw new Error('Google CSE: no results');
-      return {
-        results: data.items.map(it => ({ title: it.title, url: it.link, displayUrl: it.displayLink || it.link, desc: it.snippet || '' })),
-        total: data.searchInformation ? (parseInt(data.searchInformation.totalResults, 10) || data.items.length) : data.items.length,
-      };
-    }
-
     async function fetchResults(query, page) {
-      if (GOOGLE_API_KEY && GOOGLE_CX) {
-        try {
-          return await tryGoogleCSE(query, page);
-        } catch (e) {
-          console.warn('Google CSE failed, falling back to free search ->', e.message);
-        }
-      }
       const attemptFns = [];
       SEARX_INSTANCES.forEach(base => attemptFns.push(() => tryJsonInstance(base, query, page)));
       SEARX_INSTANCES.slice(0, 4).forEach(base => {
